@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sapphire Beauty</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- =================== FIREBASE SDK (MODULE) =================== -->
+<script type="module">
+  // ===== Supabase Initialization =====
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+  const supabaseUrl = 'https://byveeqygigugmsirqzmu.supabase.co'
+  const supabaseKey = 'sb_publishable_dV5EPuxfO4pAb0IFXXs2nQ_HasivoUh'
+  const supabase = createClient(supabaseUrl, supabaseKey)
+  // ===== Signup Function =====
+  window.signupUser = async function() {
+    const username = document.getElementById('signupUsername').value.trim();
+    const password = document.getElementById('signupPassword').value.trim();
+    if(!username || !password) return alert("Fill all fields");
+    const email = `${username}@sapphirebeauty.app`; // fake email for Firebase Auth
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
+      if (authError) { alert(authError.message); return }
+      const userId = authData.user.id
+      // Add user to users table
+      const { error: dbError } = await supabase
+        .from('users')
+        .insert([{ id: userId, username, email, cart: [], wishlist: [] }])
+      if (dbError) { alert(dbError.message); return }
+      alert('Signup successful! You can now login.')
+    } catch (err) {
+      console.error(err)
+    }
+  }
+  // ===== Login Function =====
+  window.loginUser = async function() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value.trim();
+    if(!username || !password) return alert("Fill all fields");
+    const email = `${username}@sapphirebeauty.app`;
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) { alert(error.message); return }
+      const userId = data.user.id
+      // Fetch user data (cart/wishlist)
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      if (userError) { alert(userError.message); return }
+      console.log('Logged in user:', userData)
+      currentUser = userData.username;
+      cart = userData.cart || [];
+      wishlist = userData.wishlist || [];
+      alert('Login successful!')
+    } catch (err) {
+      console.error(err)
+    }
+  }
+  // ===== Logout Function =====
+  window.logout = async function() {
+    const { error } = await supabase.auth.signOut()
+    if (error) { alert(error.message); return }
+    alert('Logged out successfully.')
+  }
+  // ===== Upload Product (Admin) =====
+  window.uploadProduct = async function(name, price, file) {
+    try {
+      // Upload image to Supabase Storage
+      const { data: storageData, error: storageError } = await supabase.storage
+        .from('products')
+        .upload(`images/${file.name}`, file, { cacheControl: '3600', upsert: true })
+      if (storageError) { alert(storageError.message); return }
+      const imageUrl = supabase.storage
+        .from('products')
+        .getPublicUrl(`images/${file.name}`).data.publicUrl
+      // Add product to products table
+      const { error: productError } = await supabase
+        .from('products')
+        .insert([{ name, price, image_url: imageUrl }])
+      if (productError) { alert(productError.message); return }
+      alert('Product uploaded successfully!')
+    } catch (err) {
+      console.error(err)
+    }
+  }
+  // ===== Fetch All Products =====
+  window.fetchProducts = async function() {
+    try {
+      const { data, error } = await supabase.from('products').select('*')
+      if (error) { console.error(error); return [] }
+      return data
+    } catch (err) {
+      console.error(err)
+      return []
+    }
+  }
+  // ===== Real-Time Product Updates =====
+  supabase
+    .channel('products')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'products' }, payload => {
+      console.log('New product added:', payload.new)
+      // Update your product DOM here
+    })
+    .subscribe()
+</script>
+<style>
+/* ================= GLOBAL RESETS ================= */
+* { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f0ff; color: #333; line-height: 1.6; -webkit-tap-highlight-color: transparent; }
+/* ================= POPUP (changed to white background) ================= */
+#popupNotification {
+    background: #ffffff !important;
+    color: #333;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    border: 1px solid #ddd;
+}
+/* ================= REST OF STYLES (unchanged) ================= */
+header {
+    background: #333333;
+    color: white;
+    padding: 10px 0 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    transition: all 0.3s ease;
+}
+.title-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    width: 100%;
+    padding: 0 15px;
+}
+#logo {
+    width: 60px;
+    height: 60px;
+    margin-right: 15px;
+    border-radius: 50%;
+    object-fit: cover;
+    transition: all 0.3s ease;
+    margin-left: 40px;
+}
+header h1 {
+    margin: 0;
+    font-size: clamp(18px, 5vw, 28px);
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 10px;
+    padding: 10px 15px;
+    scrollbar-width: none;
+    justify-content: flex-start;
+    width: 100%;
+    background-color: #4a4a4a;
+    -webkit-overflow-scrolling: touch;
+}
+nav::-webkit-scrollbar { display: none; }
+nav a, #userInfo {
+    color: white;
+    text-decoration: none;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 14px;
+    white-space: nowrap;
+    padding: 6px 12px;
+    border-radius: 20px;
+    transition: 0.3s;
+}
+nav a:hover, nav a:active {
+    background: rgba(255,255,255,0.2);
+    color: #e0b0ff;
+}
+#logoutBtn {
+    background: #d63384;
+    color: white;
+    padding: 5px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 13px;
+    border: none;
+    margin-left: 10px;
+}
+#menuBtn {
+    position: absolute;
+    left: 15px;
+    top: 110px;
+    font-size: 24px;
+    color: white;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    z-index: 3000;
+}
+main {
+    padding-top: 200px;
+    padding-left: 15px;
+    padding-right: 15px;
+    padding-bottom: 80px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+@media (min-width: 768px) {
+    main { padding-top: 220px; }
+    #logo { width: 80px; height: 80px; }
+    nav { justify-content: center; }
+    #menuBtn { top: 120px; font-size: 28px; }
+}
+.hero {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 15px;
+    margin-bottom: 30px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+}
+.hero img {
+    width: 100%;
+    height: 40vh;
+    max-height: 500px;
+    min-height: 200px;
+    object-fit: cover;
+    display: block;
+}
+.hero-content {
+    position: absolute;
+    bottom: 20px;
+    left: 0;
+    width: 100%;
+    padding: 20px;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    color: white;
+    text-align: center;
+}
+.categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 15px;
+    padding: 20px 0;
+}
+.category-card {
+    aspect-ratio: 1 / 1;
+    border-radius: 15px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px black;
+    cursor: pointer;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    overflow: hidden;
+}
+.category-card p {
+    background: rgba(51,51,51,0.85);
+    width: 100%;
+    padding: 8px;
+    text-align: center;
+    font-size: 14px;
+}
+.products {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    padding: 20px 0;
+}
+@media (min-width: 768px) {
+    .products { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+}
+.product {
+    background: white;
+    padding: 12px;
+    text-align: center;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+.product img {
+    width: 100%;
+    aspect-ratio: 1/1;
+    object-fit: cover;
+    border-radius: 10px;
+}
+.product h3 { margin: 10px 0 5px; font-size: 15px; color: #333; height: 2.4em; overflow: hidden; }
+.product .price { font-size: 16px; font-weight: 700; color: #333; }
+.product .stock-status {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    margin-top: 5px;
+    display: inline-block;
+}
+.stock-in { background: #28a745; color: white; }
+.stock-out { background: #dc3545; color: white; }
+.product-overlay {
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    background: rgba(51,51,51,0.9);
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    opacity: 0; transition: opacity 0.3s; border-radius: 15px;
+    padding: 10px;
+}
+@media (hover: hover) {
+    .product:hover .product-overlay { opacity: 1; }
+}
+@media (max-width: 767px) {
+    .product-overlay {
+        position: static;
+        opacity: 1;
+        background: transparent;
+        height: auto;
+        padding: 0;
+        margin-top: 10px;
+    }
+    .product-overlay button {
+        width: 100%;
+        margin-top: 5px;
+        padding: 8px;
+        font-size: 12px;
+    }
+}
+#loginSection, #signupSection, #cartSection, #adminSection {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+    background: white;
+    border-radius: 15px;
+}
+input[type=text], input[type=password], input[type=number], input[type=tel], textarea, select {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+}
+#sidePanel {
+    width: 280px;
+    background: #333;
+    height: 100%;
+    position: fixed;
+    top: 0;
+    left: -290px;
+    transition: left 0.3s ease;
+    z-index: 5000;
+    overflow-y: auto;
+}
+#sidePanel.open { left: 0; }
+#panelBackdrop {
+    position: fixed; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.5); z-index: 4000;
+    display: none;
+}
+.hidden { display: none !important; }
+button {
+    background: #333;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 15px;
+}
+footer { text-align: center; padding: 20px; background: #333; color: white; margin-top: 40px; }
+@media (max-width: 480px) {
+    .products { grid-template-columns: 1fr; }
+    .categories { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+    nav { gap: 5px; padding: 10px 10px; }
+    nav a, #userInfo { padding: 4px 8px; font-size: 12px; }
+    #logo { width: 50px; height: 50px; margin-right: 10px; margin-left: -5px; }
+    header h1 { font-size: clamp(16px, 4vw, 24px); }
+    main { padding-top: 120px; padding-left: 10px; padding-right: 10px; padding-bottom: 60px; }
+    #menuBtn { top: 100px; font-size: 20px; left: 10px; }
+    .hero img { height: 30vh; min-height: 150px; }
+    .hero-content { padding: 10px; bottom: 10px; font-size: 14px; }
+    .category-card p { font-size: 12px; padding: 6px; }
+    .product { padding: 8px; }
+    .product h3 { font-size: 13px; }
+    .product .price { font-size: 14px; }
+    #sidePanel { width: 100%; left: -100%; }
+    #sidePanel.open { left: 0; }
+    button { padding: 8px 16px; font-size: 13px; }
+    input, textarea, select { padding: 10px; font-size: 14px; }
+    footer { padding: 15px; font-size: 14px; }
+    #searchBox { max-width: none; width: 100%; }
+}
+</style>
+</head>
+<body>
+<div id="panelBackdrop" onclick="togglePanel()"></div>
+<header>
+    <button id="menuBtn" onclick="togglePanel()">☰</button>
+    <div class="title-container">
+        <img id="logo" src="images/logo.png" alt="Logo">
+        <h1>Sapphire Beauty</h1>
+        <input type="text" id="searchBox" placeholder="Search..." onkeyup="globalSearch()" style="flex:1; max-width:200px; margin-left:10px; padding:8px; border-radius:8px; border:1px solid #ddd; font-size:14px;">
+    </div>
+    <nav>
+        <a onclick="showSection('home')">Home</a>
+        <a onclick="showSection('shop')">Shop</a>
+        <a onclick="showSection('wishlist')">Wishlist (<span id="wishlist-count">0</span>)</a>
+        <a onclick="showSection('cart')">Cart (<span id="cart-count">0</span>)</a>
+        <a id="loginNav" onclick="showSection('login')">Login</a>
+        <a id="signupNav" onclick="showSection('signup')">Signup</a>
+        <a id="adminNav" class="hidden" onclick="showSection('admin')">Admin</a>
+        <span id="userInfo" class="hidden"></span>
+        <button id="logoutBtn" class="hidden" onclick="logout()">Logout</button>
+    </nav>
+</header>
+<button id="wishlistBtn" onclick="showSection('wishlist')" style="
+    position:fixed;bottom:30px;right:30px;background:#333;color:white;
+    width:60px;height:60px;border-radius:50%;font-size:30px;
+    box-shadow:0 6px 20px rgba(0,0,0,0.3);z-index:2000;
+    display:flex;align-items:center;justify-content:center;border:none;">
+    ❤️
+    <span id="wishlistCount" style="
+        position:absolute;top:-5px;right:-5px;background:#ff3366;
+        width:24px;height:24px;font-size:12px;border-radius:50%;
+        line-height:24px;font-weight:bold;">0</span>
+</button>
+<div id="sidePanel">
+    <button onclick="showSection('home'); togglePanel()" style="width:100%; text-align:left; background:transparent; padding:15px; border-bottom:1px solid #444;">🏠 Home</button>
+    <button onclick="toggleBrand('eveline')" style="width:100%; text-align:left; background:transparent; padding:15px; border-bottom:1px solid #444;">Eveline ▼</button>
+    <ul id="eveline" style="display:none; list-style:none; padding:0; background:#222;"></ul>
+    <button onclick="toggleBrand('neva')" style="width:100%; text-align:left; background:transparent; padding:15px; border-bottom:1px solid #444;">Neva ▼</button>
+    <ul id="neva" style="display:none; list-style:none; padding:0; background:#222;"></ul>
+    <button onclick="toggleBrand('gabrini')" style="width:100%; text-align:left; background:transparent; padding:15px; border-bottom:1px solid #444;">Gabrini ▼</button>
+    <ul id="gabrini" style="display:none; list-style:none; padding:0; background:#222;"></ul>
+    <button onclick="togglePanel()" style="color:#ff3366; width:100%; text-align:center; padding:15px;">✖ Close Menu</button>
+</div>
+<div id="popupNotification" style="display:none;"></div>
+<main>
+<section id="home">
+    <div class="hero">
+        <img id="slideShow" src="images/Eveline.jpg" alt="Banner">
+        <div class="hero-content">
+            <h2>Natural & High-Quality</h2>
+            <p>Seamless door-to-door cosmetic solutions.</p>
+        </div>
+    </div>
+    <h2 style="text-align:center; color:#333; margin:20px 0;">Shop by Category</h2>
+ 
+    <div class="categories">
+        <div class="category-card" onclick="showSection('shop'); filterCategory('skincare')" style="background-image:url('images/Skincare.jpg');"><p>Skincare</p></div>
+        <div class="category-card" onclick="showSection('shop'); filterCategory('makeup')" style="background-image:url('images/Makeup.jpg');"><p>Makeup</p></div>
+        <div class="category-card" onclick="showSection('shop'); filterCategory('haircare')" style="background-image:url('images/Haircare.jpg');"><p>Hair Care</p></div>
+        <div class="category-card" onclick="showSection('shop'); filterCategory('fragrances')" style="background-image:url('images/Fragrances.jpg');"><p>Fragrances</p></div>
+        <div class="category-card" onclick="showSection('shop'); filterCategory('tools')" style="background-image:url('images/Tools.jpg');"><p>Tools</p></div>
+        <div class="category-card" onclick="showSection('shop'); filterCategory('all')" style="background-color:#333;"><p>View All</p></div>
+    </div>
+</section>
+<section id="shop" class="hidden">
+    <div class="hero">
+        <img src="images/Shopping.jpg" alt="Shop Banner">
+        <div class="hero-content"><h2>Shop Products</h2></div>
+    </div>
+ 
+    <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:20px;">
+        <input type="text" id="searchBoxShop" placeholder="Search..." onkeyup="searchProducts()" style="flex:1; margin:0; min-width:200px;">
+        <select id="categoryFilterShop" onchange="filterCategory(this.value)" style="flex:1; margin:0; min-width:150px;">
+            <option value="all">All Categories</option>
+            <option value="skincare">Skincare</option>
+            <option value="makeup">Makeup</option>
+            <option value="haircare">Hair Care</option>
+            <option value="fragrances">Fragrances</option>
+            <option value="tools">Tools</option>
+        </select>
+    </div>
+    <div class="products" id="productContainer"></div>
+</section>
+<section id="signup" class="hidden">
+    <div class="hero">
+        <img src="images/Login.jpg" alt="Signup Banner">
+        <div class="hero-content"><h2>Create Account</h2></div>
+    </div>
+    <div id="signupSection">
+        <h2>Create Account</h2>
+        <input type="text" id="signupUsername" placeholder="Username" autocomplete="off">
+        <div style="position: relative;">
+            <input type="password" id="signupPassword" placeholder="Password" autocomplete="new-password">
+            <label style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); font-size: 12px;">
+                <input type="checkbox" onclick="togglePassword('signupPassword')"> Show
+            </label>
+        </div>
+        <div id="signupError" style="color:red; margin-bottom:10px;"></div>
+        <button onclick="signupUser()" style="width:100%">Sign Up</button>
+        <p style="margin-top:15px">Already have an account? <a onclick="showSection('login')" style="cursor:pointer; color:#d63384;">Login</a></p>
+    </div>
+</section>
+<section id="login" class="hidden">
+    <div class="hero">
+        <img src="images/Login.jpg" alt="Login Banner">
+        <div class="hero-content"><h2>Login</h2></div>
+    </div>
+    <div id="loginSection">
+        <h2>Login</h2>
+        <input type="text" id="loginUsername" placeholder="Username" autocomplete="off">
+        <div style="position: relative;">
+            <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+            <label style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); font-size: 12px;">
+                <input type="checkbox" onclick="togglePassword('loginPassword')"> Show
+            </label>
+        </div>
+        <div id="loginError" style="color:red; margin-bottom:10px;"></div>
+        <button onclick="loginUser()" style="width:100%">Login</button>
+        <p style="margin-top:15px">Don't have an account? <a onclick="showSection('signup')" style="cursor:pointer; color:#d63384;">Sign Up</a></p>
+        <p style="margin-top:10px"><a onclick="showSection('admin')" style="cursor:pointer; font-size:12px;">Admin Login</a></p>
+    </div>
+</section>
+<section id="admin" class="hidden">
+    <div id="adminLoginForm">
+        <h2>Admin Panel</h2>
+        <input type="text" id="adminUsername" placeholder="Admin Username">
+        <div style="position: relative;">
+            <input type="password" id="adminPassword" placeholder="Admin Password">
+            <label style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); font-size: 12px;">
+                <input type="checkbox" onclick="togglePassword('adminPassword')"> Show
+            </label>
+        </div>
+        <button onclick="loginAdmin()" style="width:100%">Login as Admin</button>
+    </div>
+    <div id="adminActions" class="hidden">
+        <h3>Add New Product</h3>
+        <input type="text" id="adminProdName" placeholder="Product Name">
+        <input type="text" id="adminProdCategory" placeholder="Category">
+        <input type="text" id="adminProdBrand" placeholder="Brand">
+        <input type="number" id="adminProdPrice" placeholder="Price (PKR)">
+        <select id="adminProdStockStatus" style="width:100%; padding:12px; font-size:16px; margin-bottom:15px; border-radius:8px; border:1px solid #ddd;">
+            <option value="true">In Stock</option>
+            <option value="false">Out of Stock</option>
+        </select>
+        <textarea id="adminProdDesc" placeholder="Description (appears only in product details)" rows="4"></textarea>
+        <input type="file" id="adminProdImgFile" accept="image/*" multiple style="background:white; margin-bottom:15px; width:100%">
+        <button onclick="addProduct()" style="width:100%">Add Product</button>
+     
+        <h3 style="margin-top:40px;">Dashboard</h3>
+        <div id="analyticsDashboard">
+            <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px;">
+                <div style="background:#eee; padding:10px; border-radius:10px;">Orders: <span id="totalOrders">0</span></div>
+                <div style="background:#eee; padding:10px; border-radius:10px;">Revenue: <span id="totalRevenue">0</span></div>
+                <div style="background:#eee; padding:10px; border-radius:10px;">Low Stock: <span id="lowStock">0</span></div>
+                <div style="background:#eee; padding:10px; border-radius:10px;">Total Prods: <span id="totalProducts">0</span></div>
+                <div style="background:#eee; padding:10px; border-radius:10px;">Total Users: <span id="totalUsers">0</span></div>
+            </div>
+            <div id="chartContainer" style="margin-top:20px; position:relative; height:200px;">
+                <canvas id="revenueChart"></canvas>
+            </div>
+        </div>
+        <h3 style="margin-top:40px;">Manage Orders</h3>
+        <div id="adminOrderList"></div>
+     
+        <h3 style="margin-top:40px;">Manage Products</h3>
+        <div class="products" id="adminProductList"></div>
+    </div>
+</section>
+<section id="cart" class="hidden">
+    <div class="hero">
+        <img src="images/Cart.jpg" alt="Cart Banner">
+        <div class="hero-content"><h2>Your Cart</h2></div>
+    </div>
+    <div id="cartSection">
+        <div id="cartItems" style="margin-bottom:20px;"></div>
+        <div id="cartTotal" style="font-size:20px; font-weight:bold; margin-bottom:20px; text-align:right;"></div>
+     
+        <div id="checkoutFormSection" class="hidden">
+            <h3>Delivery Details (COD)</h3>
+            <input type="text" id="buyerName" placeholder="Full Name">
+            <input type="tel" id="buyerPhone" placeholder="Phone Number">
+            <input type="text" id="buyerCity" placeholder="City">
+            <textarea id="buyerAddress" placeholder="Full Address"></textarea>
+            <input type="text" id="buyerLandmark" placeholder="Landmark">
+            <button onclick="confirmOrder()" style="width:100%; background:#28a745; margin-bottom:10px;">Confirm Order</button>
+            <button onclick="cancelCheckout()" style="width:100%; background:#dc3545;">Cancel</button>
+        </div>
+     
+        <button id="checkoutBtn" onclick="startCheckout()" style="width:100%; font-size:18px;">Checkout (COD)</button>
+        <button onclick="clearCart()" style="width:100%; background:#dc3545; margin-top:10px;">Clear Cart</button>
+    </div>
+</section>
+<section id="productDetail" class="hidden">
+    <div id="productDetailSection" style="background:white; padding:15px; border-radius:15px;">
+        <button onclick="showSection('shop')" style="background:#ddd; color:#333; margin-bottom:15px;">← Back</button>
+        <div id="productImages">
+            <img id="mainImage" src="" alt="Main Image" style="width:100%; border-radius:15px; object-fit: cover;">
+            <div id="thumbnails" style="display:flex; justify-content:center; gap:10px; margin-top:10px;"></div>
+        </div>
+        <h2 id="detailName" style="margin-top:15px;"></h2>
+        <p id="detailPrice" style="font-size:24px; font-weight:bold; color:#d63384;"></p>
+        <p id="detailStock" style="font-size:16px; margin:10px 0;"></p>
+        <div id="detailDesc" style="margin:15px 0; background:#f9f9f9; padding:15px; border-radius:8px;"></div>
+        <button id="detailAddToCart" style="width:100%; margin-top:10px;">Add to Cart</button>
+    </div>
+</section>
+<section id="wishlist" class="hidden">
+    <div class="hero">
+        <img src="images/Cart.jpg" alt="Wishlist Banner">
+        <div class="hero-content"><h2>Your Wishlist</h2></div>
+    </div>
+    <div class="products" id="wishlistItems"></div>
+</section>
+</main>
+<footer>
+    <p>© 2026 Sapphire Beauty</p>
+</footer>
+<script>
+// ────────────────────────────────────────────────
+const ADMIN_CREDENTIALS = { username: "admin", password: "admin123" };
+let currentUser = null;
+let isAdmin = false;
+let products = JSON.parse(localStorage.getItem('sapphire_products') || '[]');
+let wishlist = [];
+let cart = [];
+let orders = JSON.parse(localStorage.getItem('sapphire_orders') || '[]');
+let currentCategory = 'all';
+let currentProduct = null;
+let revenueChart = null;
+// ────────────────────────────────────────────────
+const pakistaniUsernames = ["AliKhan92", "Fatima_Pk", "UsmanRwp", "Ayesha_Lhr", "Bilal_Khi", "Sana_Isb", "Hamza_Pesh", "Zainab_Fsd"];
+const brands = ["Gabrini", "Neva", "Eveline"];
+const productsList = {
+    "Gabrini": ["Matte Lipstick", "BB Cream", "Nail Polish", "Foundation"],
+    "Neva": ["Moisturizer", "Face Serum", "Eye Cream", "Cleanser"],
+    "Eveline": ["Mascara", "Eyeliner", "Concealer", "Blush"]
+};
+function getRandomPurchaseMessage() {
+    const username = pakistaniUsernames[Math.floor(Math.random() * pakistaniUsernames.length)];
+    const brand = brands[Math.floor(Math.random() * brands.length)];
+    const product = productsList[brand][Math.floor(Math.random() * productsList[brand].length)];
+    return `${username} just bought ${brand} ${product}! 🎉`;
+}
+function showPopup() {
+    const popup = document.getElementById('popupNotification');
+    if (!popup) return;
+    popup.textContent = getRandomPurchaseMessage();
+    popup.style.display = 'block';
+    popup.style.position = 'fixed';
+    popup.style.top = '0px';
+    popup.style.left = '50%';
+    popup.style.transform = 'translateX(-50%)';
+    popup.style.background = '#ffffff';
+    popup.style.color = '#333';
+    popup.style.padding = '12px 20px';
+    popup.style.borderRadius = '30px';
+    popup.style.zIndex = '3001';
+    popup.style.fontSize = '12px';
+    popup.style.boxShadow = '0 4px 12px rgba(0,0,0,0.25)';
+    popup.style.border = '1px solid #ddd';
+    setTimeout(() => { popup.style.display = 'none'; }, 5000);
+}
+setInterval(showPopup, 180000);
+window.addEventListener('load', () => { init(); setTimeout(showPopup, 5000); });
+// ────────────────────────────────────────────────
+async function saveCart() {
+    if(!currentUser) return;
+    const { error } = await supabase.from('users').update({ cart: cart }).eq('username', currentUser);
+    if (error) console.error(error);
+}
+async function saveWishlist() {
+    if(!currentUser) return;
+    const { error } = await supabase.from('users').update({ wishlist: wishlist }).eq('username', currentUser);
+    if (error) console.error(error);
+}
+// ────────────────────────────────────────────────
+function togglePassword(id) {
+    const input = document.getElementById(id);
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+// ────────────────────────────────────────────────
+function updateHeader() {
+    const ui = document.getElementById('userInfo');
+    const logB = document.getElementById('logoutBtn');
+    if (currentUser) {
+        ui.innerText = `Hi, ${currentUser}`;
+        ui.classList.remove('hidden');
+        logB.classList.remove('hidden');
+        document.getElementById('loginNav').classList.add('hidden');
+        document.getElementById('signupNav').classList.add('hidden');
+        if (isAdmin) document.getElementById('adminNav').classList.remove('hidden');
+    } else {
+        ui.classList.add('hidden');
+        logB.classList.add('hidden');
+        document.getElementById('loginNav').classList.remove('hidden');
+        document.getElementById('signupNav').classList.remove('hidden');
+        document.getElementById('adminNav').classList.add('hidden');
+    }
+}
+function showSection(id) {
+    document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+    document.getElementById(id).classList.remove('hidden');
+    window.scrollTo(0,0);
+    if (id === 'shop') renderProducts(currentCategory);
+    if (id === 'cart') renderCart();
+    if (id === 'wishlist') renderWishlist();
+    if (id === 'admin' && isAdmin) {
+        renderAdminProductList();
+        renderAdminOrderList();
+        renderAnalyticsDashboard();
+    }
+    updateHeader();
+}
+// ────────────────────────────────────────────────
+function togglePanel() {
+    const p = document.getElementById('sidePanel');
+    const b = document.getElementById('panelBackdrop');
+    p.classList.toggle('open');
+    b.style.display = p.classList.contains('open') ? 'block' : 'none';
+}
+function toggleBrand(id) {
+    const el = document.getElementById(id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+// ────────────────────────────────────────────────
+function addProduct() {
+    const name = document.getElementById('adminProdName').value.trim();
+    const price = parseInt(document.getElementById('adminProdPrice').value);
+    const fileInput = document.getElementById('adminProdImgFile');
+    const file = fileInput.files[0];
+    if (!name || isNaN(price) || !file) {
+        return alert("Please fill name, price, and select an image.");
+    }
+    uploadProduct(name, price, file);
+}
+// ────────────────────────────────────────────────
+function renderProducts(filter = 'all') {
+    const cont = document.getElementById('productContainer');
+    cont.innerHTML = '';
+    products.forEach(p => {
+        if (filter !== 'all' && p.category !== filter) return;
+        const div = document.createElement('div');
+        div.className = 'product';
+        div.dataset.brand = p.brand;
+        div.dataset.category = p.category;
+        div.innerHTML = `
+            <img src="${p.image_url}" alt="${p.name}">
+            <h3>${p.name}</h3>
+            <p class="price">PKR ${p.price}</p>
+            <div class="stock-status ${p.inStock ? 'stock-in' : 'stock-out'}">
+                ${p.inStock ? 'In Stock' : 'Out of Stock'}
+            </div>
+            <div class="product-overlay">
+                <button onclick="addToCart('${p.name.replace(/'/g,"\\'")}',${p.price})">Add to Cart</button>
+                <button onclick="showProductDetail(products.find(x=>x.name==='${p.name.replace(/'/g,"\\'")}'))">Details</button>
+            </div>
+        `;
+        cont.appendChild(div);
+    });
+}
+function showProductDetail(p) {
+    currentProduct = p;
+    document.getElementById('mainImage').src = p.image_url;
+    document.getElementById('detailName').innerText = p.name;
+    document.getElementById('detailPrice').innerText = `PKR ${p.price}`;
+    document.getElementById('detailStock').innerHTML = `
+        <span style="color:${p.inStock ? '#28a745' : '#dc3545'}; font-weight:bold;">
+            ${p.inStock ? 'In Stock' : 'Out of Stock'}
+        </span>
+    `;
+    document.getElementById('detailDesc').innerText = p.desc || "No description available.";
+    document.getElementById('detailAddToCart').onclick = () => addToCart(p.name, p.price);
+    showSection('productDetail');
+}
+// ────────────────────────────────────────────────
+function addToCart(name, price) {
+    if (!currentUser) return showSection('login');
+    let item = cart.find(i => i.name === name);
+    if (item) item.qty++; else cart.push({ name, price, qty: 1 });
+    saveCart();
+    renderCart();
+    alert("Added to cart!");
+}
+function renderCart() {
+    const cont = document.getElementById('cartItems');
+    cont.innerHTML = cart.length ? '' : 'Your cart is empty.';
+    let total = 0;
+    cart.forEach(item => {
+        total += item.price * item.qty;
+        cont.innerHTML += `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #eee;">
+            <span>${item.name} x ${item.qty}</span>
+            <span>PKR ${item.price * item.qty}</span>
+        </div>`;
+    });
+    document.getElementById('cartTotal').innerText = `Total: PKR ${total}`;
+    document.getElementById('cart-count').innerText = cart.length;
+}
+// ────────────────────────────────────────────────
+function startCheckout() {
+    if (!cart.length) return alert("Your cart is empty!");
+    document.getElementById('checkoutFormSection').classList.remove('hidden');
+    document.getElementById('checkoutBtn').classList.add('hidden');
+}
+function cancelCheckout() {
+    document.getElementById('checkoutFormSection').classList.add('hidden');
+    document.getElementById('checkoutBtn').classList.remove('hidden');
+}
+function confirmOrder() {
+    if (!cart.length) return;
+    const buyerName = document.getElementById('buyerName').value.trim();
+    const buyerPhone = document.getElementById('buyerPhone').value.trim();
+    const buyerCity = document.getElementById('buyerCity').value.trim();
+    const buyerAddress = document.getElementById('buyerAddress').value.trim();
+    if (!buyerName || !buyerPhone || !buyerCity || !buyerAddress) {
+        return alert("Please fill all delivery details.");
+    }
+    const total = cart.reduce((acc, item) => acc + item.price * item.qty, 0);
+    const order = {
+        id: Date.now(),
+        total,
+        items: cart,
+        customerName: buyerName,
+        customerPhone: buyerPhone,
+        customerCity: buyerCity,
+        customerAddress: buyerAddress,
+        status: "Pending",
+        timestamp: new Date().toLocaleString()
+    };
+    orders.push(order);
+    localStorage.setItem('sapphire_orders', JSON.stringify(orders));
+    cart = [];
+    saveCart();
+    alert(`Order Placed Successfully!\n\nTotal: PKR ${total}\nDelivery to: ${buyerName}, ${buyerCity}\n\nThank you for shopping!`);
+    showSection('home');
+}
+function clearCart() {
+    if (confirm("Clear entire cart?")) {
+        cart = [];
+        saveCart();
+        renderCart();
+    }
+}
+// ────────────────────────────────────────────────
+function filterCategory(value) {
+    currentCategory = value;
+    renderProducts(value);
+}
+function searchProducts() {
+    const query = document.getElementById('searchBoxShop').value.toLowerCase().trim();
+    document.querySelectorAll('#productContainer .product').forEach(prod => {
+        const name = prod.querySelector('h3').innerText.toLowerCase();
+        const brand = prod.dataset.brand.toLowerCase();
+        const category = prod.dataset.category.toLowerCase();
+        prod.style.display = (name.includes(query) || brand.includes(query) || category.includes(query)) ? '' : 'none';
+    });
+}
+function globalSearch() {
+    const query = document.getElementById('searchBox').value.trim();
+    if (!query) return;
+    showSection('shop');
+    setTimeout(() => {
+        document.getElementById('searchBoxShop').value = query;
+        searchProducts();
+    }, 100);
+}
+// ────────────────────────────────────────────────
+function renderWishlist() {
+    const cont = document.getElementById('wishlistItems');
+    cont.innerHTML = '';
+    if (wishlist.length === 0) {
+        cont.innerHTML = 'Your wishlist is empty.';
+    } else {
+        wishlist.forEach(p => {
+            const div = document.createElement('div');
+            div.className = 'product';
+            div.innerHTML = `
+                <img src="${p.imgs[0]}" alt="${p.name}">
+                <h3>${p.name}</h3>
+                <p class="price">PKR ${p.price}</p>
+                <div class="product-overlay">
+                    <button onclick="addToCart('${p.name.replace(/'/g,"\\'")}',${p.price})">Add to Cart</button>
+                </div>
+            `;
+            cont.appendChild(div);
+        });
+    }
+}
+// ────────────────────────────────────────────────
+function renderAdminProductList() {
+    const cont = document.getElementById('adminProductList');
+    cont.innerHTML = '';
+    products.forEach((p, idx) => {
+        cont.innerHTML += `
+            <div class="product">
+                <img src="${p.imgs[0]}" style="object-fit: cover;">
+                <h3>${p.name}</h3>
+                <div style="margin:10px 0;">
+                    <button onclick="updateStock(${idx}, true)" style="background:#28a745;color:white;">Set In Stock</button>
+                    <button onclick="updateStock(${idx}, false)" style="background:#dc3545;color:white;">Set Out of Stock</button>
+                </div>
+                <button onclick="products.splice(${idx},1); localStorage.setItem('sapphire_products',JSON.stringify(products)); renderAdminProductList();" style="background:red">Delete</button>
+            </div>`;
+    });
+}
+function updateStock(index, status) {
+    products[index].inStock = status;
+    localStorage.setItem('sapphire_products', JSON.stringify(products));
+    renderAdminProductList();
+    renderProducts(currentCategory);
+}
+// ────────────────────────────────────────────────
+function renderAdminOrderList() {
+    const cont = document.getElementById('adminOrderList');
+    cont.innerHTML = orders.length ? '' : '<p>No orders yet.</p>';
+    orders.forEach(o => {
+        let html = `
+            <div style="border:1px solid #ddd; padding:12px; margin-bottom:12px; border-radius:8px;">
+                <strong>Order ID:</strong> ${o.id}<br>
+                <strong>Placed:</strong> ${o.timestamp}<br>
+                <strong>Customer:</strong> ${o.customerName} (${o.customerPhone})<br>
+                <strong>Address:</strong> ${o.customerAddress}, ${o.customerCity}<br>
+                <strong>Total:</strong> PKR ${o.total}<br>
+                <strong>Status:</strong> ${o.status}<br>
+                <hr style="margin:8px 0;">
+                <strong>Items:</strong><br>
+        `;
+        o.items.forEach(item => {
+            html += `• ${item.name} × ${item.qty}<br>`;
+        });
+        html += `</div>`;
+        cont.innerHTML += html;
+    });
+}
+function renderAnalyticsDashboard() {
+    document.getElementById('totalOrders').innerText = orders.length;
+    document.getElementById('totalRevenue').innerText = orders.reduce((a,b)=>a+b.total,0);
+    document.getElementById('totalProducts').innerText = products.length;
+    document.getElementById('lowStock').innerText = products.filter(p => !p.inStock).length;
+}
+// ────────────────────────────────────────────────
+function loginAdmin() {
+    const u = document.getElementById('adminUsername').value.trim();
+    const p = document.getElementById('adminPassword').value.trim();
+    if (u === ADMIN_CREDENTIALS.username && p === ADMIN_CREDENTIALS.password) {
+        currentUser = "admin";
+        isAdmin = true;
+        localStorage.setItem('currentUser', "admin");
+        localStorage.setItem('isAdmin', "true");
+        document.getElementById('adminLoginForm').classList.add('hidden');
+        document.getElementById('adminActions').classList.remove('hidden');
+        renderAdminProductList();
+        renderAdminOrderList();
+        renderAnalyticsDashboard();
+        showSection('admin');
+    } else {
+        alert("Invalid admin credentials");
+    }
+}
+function init() {
+    updateHeader();
+    renderProducts();
+    updateWishlistCount();
+}
+function updateWishlistCount() {
+    document.getElementById('wishlist-count').innerText = wishlist.length;
+    document.getElementById('wishlistCount').innerText = wishlist.length;
+}
+const slides = ['images/Eveline.jpg','images/Neva.jpg','images/Gabrini.jpg'];
+let sIdx = 0;
+setInterval(() => {
+    const img = document.getElementById('slideShow');
+    if(img) { sIdx = (sIdx + 1) % slides.length; img.src = slides[sIdx]; }
+}, 4000);
+</script>
+</body>
+</html>
