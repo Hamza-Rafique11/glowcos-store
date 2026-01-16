@@ -7,63 +7,62 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <!-- =================== FIREBASE SDK (MODULE) =================== -->
 <script type="module">
-  // ===== Supabase Initialization =====
   import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+
   const supabaseUrl = 'https://byveeqygigugmsirqzmu.supabase.co'
   const supabaseKey = 'sb_publishable_dV5EPuxfO4pAb0IFXXs2nQ_HasivoUh'
   const supabase = createClient(supabaseUrl, supabaseKey)
-  // ===== Signup Function =====
-  window.signupUser = async function() {
-    const username = document.getElementById('signupUsername').value.trim();
-    const password = document.getElementById('signupPassword').value.trim();
-    if(!username || !password) return alert("Fill all fields");
-    const email = `${username}@sapphirebeauty.app`; // fake email for Firebase Auth
-    try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
-      if (authError) { alert(authError.message); return }
-      const userId = authData.user.id
-      // Add user to users table
-      const { error: dbError } = await supabase
-        .from('users')
-        .insert([{ id: userId, username, email, cart: [], wishlist: [] }])
-      if (dbError) { alert(dbError.message); return }
-      alert('Signup successful! You can now login.')
-    } catch (err) {
-      console.error(err)
+
+  /* ================= SIGNUP ================= */
+  window.signupUser = async () => {
+    const email = document.getElementById('signupEmail').value.trim()
+    const password = document.getElementById('signupPassword').value
+
+    if (!email || !password) {
+      alert("Fill all fields")
+      return
     }
-  }
-  // ===== Login Function =====
-  window.loginUser = async function() {
-    const username = document.getElementById('loginUsername').value.trim();
-    const password = document.getElementById('loginPassword').value.trim();
-    if(!username || !password) return alert("Fill all fields");
-    const email = `${username}@sapphirebeauty.app`;
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) { alert(error.message); return }
-      const userId = data.user.id
-      // Fetch user data (cart/wishlist)
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single()
-      if (userError) { alert(userError.message); return }
-      console.log('Logged in user:', userData)
-      currentUser = userData.username;
-      cart = userData.cart || [];
-      wishlist = userData.wishlist || [];
-      alert('Login successful!')
-    } catch (err) {
-      console.error(err)
+
+    const { error } = await supabase.auth.signUp({ email, password })
+
+    if (error) {
+      alert(error.message)
+      return
     }
+
+    alert("Signup successful. Please login.")
   }
-  // ===== Logout Function =====
-  window.logout = async function() {
-    const { error } = await supabase.auth.signOut()
-    if (error) { alert(error.message); return }
-    alert('Logged out successfully.')
+
+  /* ================= LOGIN ================= */
+  window.loginUser = async () => {
+    const email = document.getElementById('loginEmail').value.trim()
+    const password = document.getElementById('loginPassword').value
+
+    if (!email || !password) {
+      alert("Fill all fields")
+      return
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    alert("Login successful")
+    console.log("User:", data.user)
   }
+
+  /* ================= LOGOUT ================= */
+  window.logout = async () => {
+    await supabase.auth.signOut()
+    alert("Logged out")
+  }
+  
   // ===== Upload Product (Admin) =====
   window.uploadProduct = async function(name, price, file) {
     try {
@@ -490,7 +489,7 @@ footer { text-align: center; padding: 20px; background: #333; color: white; marg
     </div>
     <div id="signupSection">
         <h2>Create Account</h2>
-        <input type="text" id="signupUsername" placeholder="Username" autocomplete="off">
+      <input type="email" id="signupEmail" placeholder="Email" autocomplete="email">
         <div style="position: relative;">
             <input type="password" id="signupPassword" placeholder="Password" autocomplete="new-password">
             <label style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); font-size: 12px;">
@@ -509,7 +508,7 @@ footer { text-align: center; padding: 20px; background: #333; color: white; marg
     </div>
     <div id="loginSection">
         <h2>Login</h2>
-        <input type="text" id="loginUsername" placeholder="Username" autocomplete="off">
+        <input type="email" id="loginEmail" placeholder="Email" autocomplete="email">
         <div style="position: relative;">
             <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
             <label style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); font-size: 12px;">
